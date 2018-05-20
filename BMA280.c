@@ -31,7 +31,6 @@ void initBMADriver(void){
     // Master,    i2c,    smclk (3mhz),   WR
     UCB3CTLW0 |= UCMST | UCMODE_3 | UCSSEL__SMCLK | UCTR | UCSYNC; //uscyn always 1 bc spi or i2c only no uart.
 
-
       //need to divide 3Mhz down to 100 khz...
     UCB3BR0 |= 30;
 
@@ -45,23 +44,68 @@ void initBMADriver(void){
     /* Polling implementation, Interrupts could be used in the future */
     UCB3IFG = 0; //clear existing interrupts
     // UCB3IE |=  UCNACKIE | UCRXIE0 | UCTXIE; //INTERRUPTS FOR TIMOUT, NACK, RX (BYTE RECIEVED), BYTE COMPLETE TRANSMIT
+
+    NVIC_EnableIRQ(PORT1_IRQn); // interrupt pin 2
+
+    /* NOTE: p10.1 is not supported for interrupts. You will have to do polling. which defeats the
+     * entire purpose.
+    */
 }
 
 
 void writeRegister(uint8_t address, uint8_t reg, uint8_t value){
+    //while(UCB3STATW & UCBBUSY); // wait while busy
+    while(UCB3CTLW0 & UCTXSTT); //soon as this is no longer true send the next thing
+    UCB3I2CSA = address;
 
+    UCB3CTL0 |= UCTR | UCTXSTT;
+
+    while(UCB3CTLW0 & UCTXSTT); //soon as this is no longer true send the next thing
+    UCB3TXBUF = reg;
+    while(!(UCB3IFG & UCTXIFG0)); //when empty send next thing
+
+    UCB3TXBUF = value;
+    while(!(UCB3IFG & UCTXIFG0)); //when empty send next thing
+    UCB3CTL0 |= UCTXSTP;
 }
 
 
-void readRegister(uint8_t address, uint8_t reg, uint8_t* result){
+void readSingle(uint8_t address, uint8_t reg, uint8_t* result){
+    while(UCB3STAT & UCBBUSY); //wait if busy
+       UCB3I2CSA = address;
+       UCB3CTL0 |= UCTR | UCTXSTT;
+
+    while(UCB3CTLW0 & UCTXSTT);
+       UCB3TXBUF = reg;
+    while(!(UCB3IFG & UCTXIFG0)); //wait until buf is transmitted
+
+       /* read and repeat start */
+       UCB3CTL0 &= ~UCTR;
+       UCB3CTL0 |= UCTXSTT;
+
+       while(UCB3CTLW0 & UCTXSTT);
+     //  while(!(UCB3IFG & UCRXIFG0));
+       UCB3CTL0 |= UCTXSTP;
+       /* collect the bytes requested, stuff into array, then send stop*/
+       uint8_t rxValue = UCB3RXBUF;
+       while(UCB3CTLW0 & UCTXSTP); //clear after stop been set and come out.
+
+        *result = rxValue; //remember pass an address, deref and store value.
+}
+
+void readMultiple(uint8_t address, uint8_t reg, uint8_t numBytes,uint8_t* result){
+    while(UCB3STAT & UCBBUSY); //wait if busy
+    UCB3I2CSA = address;
 
 }
+
 
 void beginTransmission(uint8_t address){
-
+    UCB3I2CSA = address;
+    UCB3CTL0 |= UCTXSTT;
 }
 
 
 void stopTransmission(void){
-
+    EUSCI_B3->CTLW0 |= UCTXSTP; //send stop command;
 }
